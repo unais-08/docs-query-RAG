@@ -1,10 +1,13 @@
-import { readFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import path from 'node:path';
+import { randomUUID } from 'node:crypto';
 
 import { logger } from '../../config/logger.js';
 import { DocumentError } from '../../modules/documents/document.errors.js';
 
 import { bucketName, supabase } from './supabase.client.js';
 import { getStoragePath } from './supabase.helper.js';
+import { env } from '../../config/env.js';
 
 
 export const uploadDocument = async (
@@ -52,4 +55,19 @@ export const deleteDocument = async (storagePath: string): Promise<void> => {
   } catch (error) {
     throw new DocumentError('Document storage cleanup failed', 502, 'STORAGE_DELETE_FAILED');
   }
+};
+
+export const downloadDocumentToTempFile = async (storagePath: string, extension: string): Promise<string> => {
+  const { data, error } = await supabase.storage.from(bucketName).download(storagePath);
+  if (error || !data) {
+    logger.error({ err: error, storagePath }, 'Document download from storage failed');
+    throw new DocumentError('Document download failed', 502, 'STORAGE_DOWNLOAD_FAILED');
+  }
+
+  const safeExtension = /^\.[a-z0-9]+$/i.test(extension) ? extension : '.bin';
+  const directory = path.resolve(env.UPLOAD_DIR);
+  await mkdir(directory, { recursive: true });
+  const filePath = path.join(directory, `${randomUUID()}${safeExtension}`);
+  await writeFile(filePath, Buffer.from(await data.arrayBuffer()), { flag: 'wx' });
+  return filePath;
 };

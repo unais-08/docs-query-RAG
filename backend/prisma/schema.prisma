@@ -31,6 +31,8 @@ model Document {
   fileSize         Int
   filePath         String?
   storagePath      String?
+  processingStatus DocumentProcessingStatus @default(queued)
+  processingError  String?
   createdAt        DateTime       @default(now())
   updatedAt        DateTime       @updatedAt
 
@@ -39,6 +41,13 @@ model Document {
 
   @@index([userId, createdAt])
   @@map("documents")
+}
+
+enum DocumentProcessingStatus {
+  queued
+  processing
+  ready
+  failed
 }
 
 model Conversation {

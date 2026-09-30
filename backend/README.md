@@ -12,9 +12,13 @@ The backend for QueryDocs, a document question-and-answer application. It is a T
 
 ## Setup
 
-1. Install dependencies:
+1. Build your queue SDK, then install this backend's dependencies. The SDK is linked from the sibling `../async-queue/client-sdk` folder, so build it first:
 
    ```bash
+   cd ../../async-queue/client-sdk
+   npm install
+   npm run build
+   cd ../../docs-query-RAG/backend
    npm install
    ```
 
@@ -40,19 +44,31 @@ The backend for QueryDocs, a document question-and-answer application. It is a T
    docker compose up -d postgres
    ```
 
-5. Generate Prisma Client and apply the Prisma schema:
+5. Start your Async Queue service from the sibling project. Configure its `.env` to use the PostgreSQL database started above (for example, `postgresql://postgres:postgres@localhost:5432/querydocs`), set its `WORKER_API_KEY`, then run from `../async-queue/backend`:
+
+   ```bash
+   npm run dev
+   ```
+
+   The queue service initializes its own `Job` and `FailedJob` tables in that database. Keep its `WORKER_API_KEY` equal to the value used by this application's document worker.
+
+6. Generate Prisma Client and apply the Prisma schema:
 
    ```bash
    npm run db:generate
    npm run db:push
    ```
 
-6. Run [`prisma/supabase-vector.sql`](prisma/supabase-vector.sql) in the Supabase SQL Editor. This creates the vector storage table, similarity-search function, and HNSW index used by document queries.
+7. Run [`prisma/supabase-vector.sql`](prisma/supabase-vector.sql) in the Supabase SQL Editor. This creates the vector storage table, similarity-search function, and HNSW index used by document queries.
 
-7. Start the development server:
+8. Start the API and the application-owned queue worker in separate terminals:
 
    ```bash
    npm run dev
+   ```
+
+   ```bash
+   npm run worker:dev
    ```
 
 The API listens on `http://localhost:8080` by default. The host, port, API prefix, and other defaults are defined in [`src/config/env.ts`](src/config/env.ts).
@@ -70,6 +86,9 @@ All supported variables are listed in [`.env.example`](.env.example).
 | `API_PREFIX` | API route prefix | `/api/v1` |
 | `CLIENT_ORIGIN` | Allowed CORS origin | `http://localhost:3000` |
 | `DATABASE_URL` | PostgreSQL connection string | Local Docker database URL |
+| `QUEUE_URL` | Async Queue API base URL | `http://localhost:4000` |
+| `WORKER_API_KEY` | Shared key for the Async Queue service and this app's worker | Required to run the worker |
+| `WORKER_CONCURRENCY` | Number of document jobs processed at once | `2` |
 | `JWT_SECRET` | JWT signing secret | Development fallback; use a unique secret of at least 32 characters in production |
 | `JWT_EXPIRES_IN` | JWT lifetime | `1h` |
 | `UPLOAD_DIR` | Temporary upload directory | ./Dir_name |
@@ -95,7 +114,7 @@ The Prisma schema stores users, documents, document chunks, conversations, and c
 - Password: `postgres`
 - Port: `5432`
 
-The local upload directory is temporary. During document processing, the API extracts text, cleans it, splits it into chunks, generates embeddings, and uploads the original file to the configured private Supabase Storage bucket. Stored files use the path `userId/documentId/originalFileName`.
+The API uploads each original file to the configured private Supabase Storage bucket and submits a `process_document` job to Async Queue. The separate application worker downloads that durable source and extracts text, cleans it, splits it into chunks, generates embeddings, then writes chunk text to PostgreSQL and vectors to Supabase. Documents expose `queued`, `processing`, `ready`, or `failed` status; only `ready` documents can be queried. Stored files use the path `userId/documentId/originalFileName`.
 
 ## API
 
@@ -130,7 +149,7 @@ All document endpoints are protected.
 
 | Method | Endpoint | Description |
 | --- | --- | --- |
-| `POST` | `/api/v1/documents` | Uploads one `.txt`, `.pdf`, or `.docx` file as multipart field `file`; optional field: `name` |
+| `POST` | `/api/v1/documents` | Uploads one `.txt`, `.pdf`, or `.docx` file as multipart field `file`; returns `202 Accepted` with the document and Async Queue job ID; optional field: `name` |
 | `GET` | `/api/v1/documents` | Lists the user's documents |
 | `GET` | `/api/v1/documents/stats` | Returns the user's document statistics |
 | `GET` | `/api/v1/documents/:id` | Returns one owned document |

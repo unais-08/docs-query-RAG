@@ -97,9 +97,9 @@ export default function DocsChatPage() {
         if (!token) return;
 
         let cancelled = false;
-        void getDocuments(token)
+        const refreshDocuments = () => void getDocuments(token)
             .then((response) => {
-                if (!cancelled) setDocuments(response.documents.map(toDocSource));
+                if (!cancelled) setDocuments(response.documents.filter((document) => document.status === "ready").map(toDocSource));
             })
             .catch((error: unknown) => {
                 if (!cancelled) toast.error(getErrorMessage(error, "Failed to load documents."));
@@ -107,9 +107,12 @@ export default function DocsChatPage() {
             .finally(() => {
                 if (!cancelled) setDocumentsLoading(false);
             });
+        refreshDocuments();
+        const poll = window.setInterval(refreshDocuments, 3000);
 
         return () => {
             cancelled = true;
+            window.clearInterval(poll);
         };
     }, [token]);
 
@@ -241,9 +244,8 @@ export default function DocsChatPage() {
 
         setUploading(true);
         try {
-            const response = await uploadDocument(file, token);
-            setDocuments((previous) => [toDocSource(response.document), ...previous]);
-            toast.success("Document uploaded successfully.");
+            await uploadDocument(file, token);
+            toast.success("Document queued. It will appear here when processing finishes.");
         } catch (error: unknown) {
             toast.error(getErrorMessage(error, "Failed to upload document."));
         } finally {

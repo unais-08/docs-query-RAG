@@ -88,10 +88,10 @@ export const queryDocuments = async (
 ) => {
     await assertConversationOwnership(userId, conversationId);
     const ownedDocumentCount = await prisma.document.count({
-        where: { id: { in: documentIds }, userId },
+        where: { id: { in: documentIds }, userId, processingStatus: 'ready' },
     });
     if (ownedDocumentCount !== documentIds.length) {
-        throw new DocumentError("One or more selected documents were not found", 400, "INVALID_DOCUMENT_SELECTION");
+        throw new DocumentError("One or more selected documents are still processing or unavailable", 409, "DOCUMENT_NOT_READY");
     }
 
     await prisma.conversation.updateMany({

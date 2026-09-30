@@ -11,6 +11,8 @@ const documentSummary = {
   name: true,
   fileType: true,
   fileSize: true,
+  processingStatus: true,
+  processingError: true,
   createdAt: true,
   updatedAt: true
 } as const;
@@ -21,6 +23,8 @@ const toDocumentResponse = (document: {
   name: string;
   fileType: string;
   fileSize: number;
+  processingStatus: string;
+  processingError: string | null;
   createdAt: Date;
   updatedAt: Date;
 }) => ({
@@ -28,6 +32,8 @@ const toDocumentResponse = (document: {
   name: document.name,
   type: document.fileType,
   size: document.fileSize,
+  status: document.processingStatus,
+  processingError: document.processingError,
   createdAt: document.createdAt,
   updatedAt: document.updatedAt
 });
@@ -45,7 +51,8 @@ export const createDocument = async (
         originalFileName: file.originalname,
         fileType: file.mimetype,
         fileSize: file.size,
-        filePath: null
+        filePath: null,
+        processingStatus: 'queued'
       },
       select: { ...documentSummary, originalFileName: true }
     });
@@ -69,6 +76,15 @@ export const setDocumentStoragePath = async (documentId: string, storagePath: st
     data: { storagePath }
   });
 };
+
+export const updateDocumentProcessing = async (
+  documentId: string,
+  processingStatus: 'queued' | 'processing' | 'ready' | 'failed',
+  processingError: string | null = null
+) => prisma.document.updateMany({
+  where: { id: documentId },
+  data: { processingStatus, processingError }
+});
 
 export const listDocuments = async (userId: string) => {
   const [documents, count] = await prisma.$transaction([
