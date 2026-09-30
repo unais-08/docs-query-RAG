@@ -9,6 +9,11 @@ services:
       POSTGRES_DB: querydocs
     ports:
       - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d querydocs"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
     volumes:
       - querydocs-postgres-data:/var/lib/postgresql/data
 

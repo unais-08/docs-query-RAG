@@ -27,13 +27,18 @@ import {
 } from "@/lib/api/documents";
 
 type DocumentStatus = "Ready" | "Processing" | "Failed";
-type DocumentItem = Document & { sizeLabel: string; status: DocumentStatus };
+type DocumentItem = Omit<Document, "status"> & { sizeLabel: string; status: DocumentStatus };
 
 function toDocumentItem(document: Document): DocumentItem {
+  const status: DocumentStatus = document.status === "ready"
+    ? "Ready"
+    : document.status === "failed"
+      ? "Failed"
+      : "Processing";
   return {
     ...document,
     sizeLabel: `${(document.size / (1024 * 1024)).toFixed(1)} MB`,
-    status: "Ready",
+    status,
   };
 }
 
@@ -88,7 +93,7 @@ export default function DocumentsPage() {
     if (!token) return;
 
     let cancelled = false;
-    void getDocuments(token)
+    const refreshDocuments = () => void getDocuments(token)
       .then((response) => {
         if (!cancelled) setDocuments(response.documents.map(toDocumentItem));
       })
@@ -98,9 +103,12 @@ export default function DocumentsPage() {
       .finally(() => {
         if (!cancelled) setDocumentsLoading(false);
       });
+    refreshDocuments();
+    const poll = window.setInterval(refreshDocuments, 3000);
 
     return () => {
       cancelled = true;
+      window.clearInterval(poll);
     };
   }, [token]);
 
@@ -131,7 +139,7 @@ export default function DocumentsPage() {
     try {
       const response = await uploadDocument(file, token);
       setDocuments((previous) => [toDocumentItem(response.document), ...previous]);
-      toast.success("Document uploaded successfully", { id: uploadToast });
+      toast.success("Document queued for processing", { id: uploadToast });
     } catch {
       toast.error("Failed to upload document", { id: uploadToast });
     } finally {

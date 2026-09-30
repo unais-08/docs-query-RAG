@@ -11,6 +11,9 @@ const environmentSchema = z.object({
   CLIENT_ORIGIN: z.string().url().default('http://localhost:3000'),
 
   DATABASE_URL: z.string().url().default('postgresql://postgres:postgres@localhost:5432/querydocs?schema=public'),
+  QUEUE_URL: z.string().url().default('http://localhost:4000'),
+  WORKER_API_KEY: z.preprocess((value) => value === '' ? undefined : value, z.string().min(1).optional()),
+  WORKER_CONCURRENCY: z.coerce.number().int().positive().default(2),
 
   JWT_SECRET: z.string().min(32).default('change-this-development-secret-at-least-32-chars'),
   JWT_EXPIRES_IN: z.string().default('1h'),

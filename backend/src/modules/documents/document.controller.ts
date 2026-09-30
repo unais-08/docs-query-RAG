@@ -1,9 +1,7 @@
 import type { NextFunction, Request, Response } from 'express';
 import {
   createDocument,
-  createDocumentChunks,
   deleteDocument,
-  deleteDocumentChunks,
   getDocument,
   getDocumentStats,
   listDocuments,
@@ -12,21 +10,16 @@ import {
 } from './document.service.js';
 import { documentIdSchema, renameDocumentSchema, uploadDocumentFieldsSchema } from './document.schemas.js';
 import { DocumentError } from './document.errors.js';
-import { documentProcessingService } from '../../infrastructure/document-processing/document.processing.service.js';
 import { logger } from '../../config/logger.js';
-import {
-  deleteChunkVectorsById,
-  deleteChunkVectorsForDocument,
-  upsertChunkVectors,
-} from '../../infrastructure/vector-store/supabase.vector.service.js';
 import { prisma } from '../../config/prisma.js';
 import { deleteDocument as deleteSupabaseDocument, uploadDocument } from '../../infrastructure/storage/supabase.storage.service.js';
 import { removeStoredFile } from './file.localdisk.storage.js';
+import { enqueueDocumentProcessing } from '../../infrastructure/queue/async-queue.client.js';
+import { deleteChunkVectorsForDocument } from '../../infrastructure/vector-store/supabase.vector.service.js';
 
 
 export const upload = async (request: Request, response: Response, next: NextFunction) => {
   let createdDocumentId: string | null = null;
-  let createdChunkIds: string[] = [];
   let storagePath: string | null = null;
 
   try {
@@ -39,36 +32,6 @@ export const upload = async (request: Request, response: Response, next: NextFun
     const documentId = result.document.id;
     createdDocumentId = documentId;
 
-    // Extract, clean, chunk, and generate embeddings for the uploaded document.
-    const filePath = request.file.path;
-    const processedDocument = await documentProcessingService.extractAndChunk(filePath);
-
-    // Store chunk text in PostgreSQL; vectors are stored in Supabase pgvector.
-    const storedChunks = await createDocumentChunks(documentId, request.userId, processedDocument.chunks);
-    createdChunkIds = storedChunks.map((chunk) => chunk.id);
-
-    // Link each generated embedding to its corresponding database chunk.
-    const chunkVectors = processedDocument.chunks.map((chunk) => {
-      const storedChunk = storedChunks.find((stored) => stored.chunkIndex === chunk.index);
-
-      if (!storedChunk) {
-        throw new Error(`Missing stored chunk for index ${chunk.index}`);
-      }
-
-      return {
-        id: storedChunk.id,
-        chunkId: storedChunk.id,
-        userId: request.userId,
-        documentId,
-        chunkIndex: chunk.index,
-        pageNumber: chunk.pageNumber ?? null,
-        embedding: chunk.embedding,
-      };
-    });
-
-    // Store embeddings in Supabase pgvector for semantic similarity search.
-    await upsertChunkVectors(chunkVectors);
-
     storagePath = await uploadDocument(
       request.file.path,
       request.userId,
@@ -77,31 +40,27 @@ export const upload = async (request: Request, response: Response, next: NextFun
       request.file.mimetype
     );
     await setDocumentStoragePath(documentId, storagePath);
-    await removeStoredFile(request.file.path);
+    const job = await enqueueDocumentProcessing({ documentId, userId: request.userId, storagePath });
+    await removeStoredFile(request.file.path).catch((cleanupError) => {
+      logger.warn({ err: cleanupError, documentId }, 'Could not remove temporary upload file');
+    });
 
     logger.info(
-      {
-        documentId: createdDocumentId,
-        characterCount: processedDocument.characterCount,
-        chunkCount: processedDocument.chunks.length,
-        storedChunkCount: storedChunks.length,
-      },
-      'Document extracted, chunked, stored, and vectorized'
+      { documentId, jobId: job.jobId },
+      'Document uploaded and queued for processing'
     );
 
-    response.status(201).json(result);
+    response.status(202).json({ ...result, jobId: job.jobId });
   } catch (error) {
-    // Roll back PostgreSQL, vector, and file data if ingestion fails midway.
+    // Clean up if storage or job submission fails before the request is accepted.
     if (createdDocumentId) {
-      await deleteChunkVectorsById(createdChunkIds).catch(() => undefined);
-      await deleteChunkVectorsForDocument(createdDocumentId, request.userId).catch(() => undefined);
-      await deleteDocumentChunks(createdDocumentId).catch(() => undefined);
       await prisma.document.delete({ where: { id: createdDocumentId } }).catch(() => undefined);
     }
 
     if (storagePath) {
       await deleteSupabaseDocument(storagePath).catch(() => undefined);
     }
+    if (request.file?.path) await removeStoredFile(request.file.path).catch(() => undefined);
 
     next(error);
   }

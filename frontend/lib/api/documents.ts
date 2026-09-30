@@ -29,6 +29,8 @@ export type Document = {
   size: number;
   createdAt: string;
   updatedAt: string;
+  status: "queued" | "processing" | "ready" | "failed";
+  processingError: string | null;
 };
 
 type DocumentsResponse = {

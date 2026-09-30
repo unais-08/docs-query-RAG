@@ -9,7 +9,9 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "dev": "tsx watch src/server.ts",
+    "worker:dev": "tsx watch src/workers/document.worker.ts",
     "start": "node dist/server.js",
+    "worker": "node dist/workers/document.worker.js",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "node --import tsx --test \"src/**/*.test.ts\"",
     "db:generate": "prisma generate",
@@ -17,6 +19,7 @@
     "db:studio": "prisma studio"
   },
   "dependencies": {
+    "@async-queue/client": "file:../../async-queue/client-sdk",
     "@google/genai": "^2.22.0",
     "@prisma/client": "^6.19.3",
     "@supabase/supabase-js": "^2.116.0",
